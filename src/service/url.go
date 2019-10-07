@@ -1,7 +1,6 @@
 package services
 
 import (
-	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -25,206 +24,152 @@ func UrlServiceHandler() *UrlService {
 }
 
 type UrlServiceInterface interface {
-	// ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int)
-	// GetShortCode(shortcode string) (*httpEntity.Url, error, string, int)
-	// GetStats(shortcode string) (*httpEntity.ShortcodeStats, error, string, int)
-
 	ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int)
 	GetShortCode(shortcode string) (*httpEntity.Url, error, string, int)
 	GetStats(shortcode string) (*httpEntity.ShortcodeStats, error, string, int)
 }
 
-// func (service *UrlService) ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int) {
-// 	var url dbEntity.Url
+func GenerateShortUrl() string {
+	g, err := reggen.NewGenerator("^[0-9a-zA-Z_]{6}$")
+	if err != nil {
+		panic(err)
+	}
+	return g.Generate(0)
+}
 
-// 	url.Url = form.URL
-// 	url.UrlShort = form.Shortcode
-// 	_, err, message, status := service.urlRepository.ShortenUrl(&url)
-// 	result := httpEntity.Url{}
-// 	copier.Copy(&result, url)
-// 	return &result, err, message, status
-// }
+func CheckInsertShortUrl(shortcode string) bool {
+	r := regexp.MustCompile(`^[0-9a-zA-Z_]{4,}$`)
+	matches := r.FindAllString(shortcode, 1)
 
-// func (service *UrlService) GetShortCode(shortcode string) (*httpEntity.Url, error, string, int) {
-// 	//var url *dbEntity.Url
-// 	url, err, message, status := service.urlRepository.GetShortCode(shortcode)
-// 	result := httpEntity.Url{}
-// 	copier.Copy(&result, url)
-// 	return &result, err, message, status
-// }
+	checkRegex := false
+	if len(matches) > 0 {
+		checkRegex = true
+	}
+	return checkRegex
+}
 
-// func (service *UrlService) GetStats(shortcode string) (*httpEntity.ShortcodeStats, error, string, int) {
-// 	var result httpEntity.ShortcodeStats
-// 	url, err, message, status := service.urlRepository.GetStats(shortcode)
-// 	if url != nil {
-// 		result.LastSeenDate = url.LastSeenDate
-// 		result.RedirectCount = url.RedirectCount
-// 		result.StartDate = url.CreatedAt
-// 		return &result, err, message, status
-// 	}
-// 	return nil, err, message, status
-// }
+func CheckFormToDB(urlList []*dbEntity.Url, shorcode string) bool {
+	for i, _ := range urlList {
+		if urlList[i].UrlShort == shorcode {
+			return true
+		}
+	}
+	return false
+}
+
+func Success(url dbEntity.Url) (*httpEntity.Url, error, string, int) {
+	var result httpEntity.Url
+	result.ID = url.ID
+	result.CreatedAt = url.CreatedAt
+	result.Url = url.Url
+	result.UrlShort = url.UrlShort
+	message := "created"
+	return &result, nil, message, http.StatusCreated
+}
+
+func InserForm(form httpEntity.UrlForm) dbEntity.Url {
+	var url dbEntity.Url
+	now := time.Now()
+	url.CreatedAt = now
+	url.Url = form.URL
+	url.UrlShort = form.Shortcode
+
+	return url
+}
 
 func (service *UrlService) ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int) {
-	urlList, err, message, status := service.urlRepository.GetUrlList()
+	urlList, err := service.urlRepository.GetUrlList()
 	if err != nil {
-		return nil, err, message, status
+		message := "can't get url list from database"
+		return nil, err, message, http.StatusBadGateway
 	}
-	var url dbEntity.Url
+	if len(urlList) == 0 && form.Shortcode == "" {
+		form.Shortcode = GenerateShortUrl()
+		url := InserForm(form)
 
-	var result httpEntity.Url
+		err = service.urlRepository.InsertUrl(&url)
+		if err != nil {
+			message := "can't get url list from database"
+			return nil, err, message, http.StatusBadGateway
+		}
+		result, error, message, status := Success(url)
+		return result, error, message, status
 
-	now := time.Now()
-
-	if len(urlList) == 0 {
-		if form.Shortcode == "" {
-			g, err := reggen.NewGenerator("^[0-9a-zA-Z_]{6}$")
+	} else if len(urlList) == 0 && form.Shortcode != "" {
+		if CheckInsertShortUrl(form.Shortcode) {
+			url := InserForm(form)
+			err := service.urlRepository.InsertUrl(&url)
 			if err != nil {
-				panic(err)
+				message := "can't insert data from database"
+				return nil, err, message, http.StatusBadGateway
 			}
-			generate := g.Generate(0)
-			form.Shortcode = generate
-
-			url.CreatedAt = now
-			url.Url = form.URL
-			url.UrlShort = form.Shortcode
-
-			err, message, status := service.urlRepository.InsertUrl(&url)
-			if err != nil {
-				return nil, err, message, status
-			}
-			result.ID = url.ID
-			result.CreatedAt = url.CreatedAt
-			result.Url = url.Url
-			result.UrlShort = url.UrlShort
-			return &result, nil, message, http.StatusCreated
+			result, error, message, status := Success(url)
+			return result, error, message, status
 		} else {
-			r := regexp.MustCompile(`^[0-9a-zA-Z_]{4,}$`)
-			matches := r.FindAllString(form.Shortcode, 1)
+			//not pass regex
+			message := "The shortcode fails to meet the following regexp: ^[0-9a-zA-Z_]{4,}$."
+			return nil, nil, message, http.StatusUnprocessableEntity
+		}
 
-			checkRegex := false
-			if len(matches) > 0 {
-				checkRegex = true
-			}
-
-			if checkRegex {
-				//fmt.Println("if")
-				form.Shortcode = matches[0]
-				url.CreatedAt = now
-				url.Url = form.URL
-				url.UrlShort = form.Shortcode
-				err, message, status := service.urlRepository.InsertUrl(&url)
+	} else if len(urlList) > 0 && form.Shortcode == "" {
+		for {
+			form.Shortcode = GenerateShortUrl()
+			if !CheckFormToDB(urlList, form.Shortcode) {
+				// inssert shorten code to database
+				url := InserForm(form)
+				err := service.urlRepository.InsertUrl(&url)
 				if err != nil {
-					return nil, err, message, status
+					message := "can't insert data from database"
+					return nil, err, message, http.StatusBadGateway
 				}
-				result.ID = url.ID
-				result.CreatedAt = url.CreatedAt
-				result.Url = url.Url
-				result.UrlShort = url.UrlShort
-				return &result, nil, message, http.StatusCreated
-			} else {
-				//not pass regex
-				//fmt.Println("else")
-				message := "The shortcode fails to meet the following regexp: ^[0-9a-zA-Z_]{4,}$."
-				return nil, nil, message, http.StatusUnprocessableEntity
+				result, error, message, status := Success(url)
+				return result, error, message, status
 			}
 		}
-	} else {
-		if form.Shortcode == "" {
-			for {
-				g, err := reggen.NewGenerator("^[0-9a-zA-Z_]{6}$")
-				if err != nil {
-					panic(err)
-				}
-				generate := g.Generate(0)
-
-				check := false
-				for i, _ := range urlList {
-					if urlList[i].UrlShort == generate {
-						check = true
-					}
-				}
-				if !check {
-					// inssert shorten code to database
-					fmt.Println("else-if-if")
-					form.Shortcode = generate
-
-					url.CreatedAt = now
-					url.Url = form.URL
-					url.UrlShort = form.Shortcode
-
-					err, message, status := service.urlRepository.InsertUrl(&url)
-					if err != nil {
-						return nil, err, message, status
-					}
-					result.ID = url.ID
-					result.CreatedAt = url.CreatedAt
-					result.Url = url.Url
-					result.UrlShort = url.UrlShort
-					return &result, nil, message, http.StatusCreated
-				}
+	} else if len(urlList) > 0 && form.Shortcode != "" {
+		if CheckInsertShortUrl(form.Shortcode) && !CheckFormToDB(urlList, form.Shortcode) {
+			url := InserForm(form)
+			err := service.urlRepository.InsertUrl(&url)
+			if err != nil {
+				message := "can't insert data from database"
+				return nil, err, message, http.StatusBadGateway
 			}
+			result, error, message, status := Success(url)
+			return result, error, message, status
+		} else if CheckInsertShortUrl(form.Shortcode) && CheckFormToDB(urlList, form.Shortcode) {
+			message := "The the desired shortcode is already in use. Shortcodes are case-sensitive."
+			return nil, nil, message, http.StatusConflict
 		} else {
-			r := regexp.MustCompile(`^[0-9a-zA-Z_]{4,}$`)
-			matches := r.FindAllString(form.Shortcode, 1)
-			checkRegex := false
-			if len(matches) > 0 {
-				checkRegex = true
-			}
-			if checkRegex {
-				check := false
-				for i, _ := range urlList {
-					if urlList[i].UrlShort == form.Shortcode {
-						check = true
-					}
-				}
-				if !check {
-					// fmt.Println("insert to db")
-					// inssert shorten code to database
-					form.Shortcode = matches[0]
-					url.CreatedAt = now
-					url.Url = form.URL
-					url.UrlShort = form.Shortcode
-					err, message, status := service.urlRepository.InsertUrl(&url)
-					if err != nil {
-						return nil, err, message, status
-					}
-					result.ID = url.ID
-					result.CreatedAt = url.CreatedAt
-					result.Url = url.Url
-					result.UrlShort = url.UrlShort
-					return &result, nil, message, http.StatusCreated
-				} else {
-					// shorcode exist in database
-					message := "The the desired shortcode is already in use. Shortcodes are case-sensitive."
-					return nil, nil, message, http.StatusConflict
-				}
-			} else {
-				message := "The shortcode fails to meet the following regexp: ^[0-9a-zA-Z_]{4,}$."
-				return nil, nil, message, http.StatusUnprocessableEntity
-			}
+			message := "The shortcode fails to meet the following regexp: ^[0-9a-zA-Z_]{4,}$."
+			return nil, nil, message, http.StatusUnprocessableEntity
 		}
 	}
-
-	return nil, nil, "", 200
+	return nil, nil, "", 0
 }
 
 func (service *UrlService) GetShortCode(shortcode string) (*httpEntity.Url, error, string, int) {
 
-	url, err, message, status := service.urlRepository.UpdateUrl(shortcode)
+	url, err := service.urlRepository.UpdateUrl(shortcode)
+	if err != nil {
+		message := "The shortcode cannot be found in the system"
+		return nil, err, message, http.StatusNotFound
+	}
 	result := httpEntity.Url{}
 	copier.Copy(&result, url)
-	return &result, err, message, status
+	message := "success get shortcode"
+	return &result, err, message, http.StatusOK
 }
 
 func (service *UrlService) GetStats(shortcode string) (*httpEntity.ShortcodeStats, error, string, int) {
 	var result httpEntity.ShortcodeStats
-	url, err, message, status := service.urlRepository.GetStats(shortcode)
-	if url != nil {
-		result.LastSeenDate = url.LastSeenDate
-		result.RedirectCount = url.RedirectCount
-		result.StartDate = url.CreatedAt
-		return &result, err, message, status
+	url, err := service.urlRepository.GetStats(shortcode)
+	if err != nil {
+		message := "The shortcode cannot be found in the system"
+		return &result, err, message, http.StatusNotFound
 	}
-	return nil, err, message, status
+	result.LastSeenDate = url.LastSeenDate
+	result.RedirectCount = url.RedirectCount
+	result.StartDate = url.CreatedAt
+	message := "success get status"
+	return &result, err, message, http.StatusOK
 }
