@@ -1,0 +1,27 @@
+version: '3.0'
+services:
+  golang:
+    build:
+      context: ./docker-configuration
+      dockerfile: go-docker
+    container_name: golang_example
+    ports:
+      # <Port exposed> : < Port running inside container>
+      - 8021:3000
+    volumes:
+      - './src:/go/src/example_app:rw'
+    tty: true
+  mysql:
+    build:
+      context: .
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_USER: gotest
+      MYSQL_PASSWORD: gotest
+      MYSQL_ROOT_PASSWORD: gotest
+      MYSQL_DATABASE: local_gotest
+    # sync folders. MySQL data is stored outside container so that rebuilding doesn't clear db.
+    # folder is at workspace root.
+    volumes:
+      - ./db/:/var/lib/mysql
