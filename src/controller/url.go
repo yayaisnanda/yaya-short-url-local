@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	httpEntity "yaya_short_url_local/src/entity/http"
 	services "yaya_short_url_local/src/service"
@@ -9,7 +10,8 @@ import (
 )
 
 type UrlController struct {
-	UrlService services.UrlServiceInterface
+	UrlService    services.UrlServiceInterface
+	InsertService services.InsertInterface
 }
 
 func (service *UrlController) ShortenUrl(context *gin.Context) {
@@ -23,9 +25,10 @@ func (service *UrlController) ShortenUrl(context *gin.Context) {
 		context.JSON(http.StatusBadRequest, res)
 		return
 	}
-
+	fmt.Println(form)
 	result, err, message, status := service.UrlService.ShortenUrl(form)
-	if nil != err || result == nil {
+	fmt.Println(result)
+	if err != nil || result == nil {
 		res.Success = false
 		res.Message = message
 		context.JSON(status, res)

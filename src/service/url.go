@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -24,9 +25,14 @@ func UrlServiceHandler() *UrlService {
 }
 
 type UrlServiceInterface interface {
-	ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int)
 	GetShortCode(shortcode string) (*httpEntity.Url, error, string, int)
 	GetStats(shortcode string) (*httpEntity.ShortcodeStats, error, string, int)
+	ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int)
+}
+
+type InsertInterface interface {
+	insertUrlToDB(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int)
+	GetUrlFromDB() ([]*dbEntity.Url, error)
 }
 
 func GenerateShortUrl() string {
@@ -40,12 +46,10 @@ func GenerateShortUrl() string {
 func CheckInsertShortUrl(shortcode string) bool {
 	r := regexp.MustCompile(`^[0-9a-zA-Z_]{4,}$`)
 	matches := r.FindAllString(shortcode, 1)
-
-	checkRegex := false
 	if len(matches) > 0 {
-		checkRegex = true
+		return true
 	}
-	return checkRegex
+	return false
 }
 
 func CheckFormToDB(urlList []*dbEntity.Url, shorcode string) bool {
@@ -57,7 +61,19 @@ func CheckFormToDB(urlList []*dbEntity.Url, shorcode string) bool {
 	return false
 }
 
-func Success(url dbEntity.Url) (*httpEntity.Url, error, string, int) {
+func (service *UrlService) insertUrlToDB(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int) {
+	var url dbEntity.Url
+	now := time.Now()
+	url.CreatedAt = now
+	url.Url = form.URL
+	url.UrlShort = form.Shortcode
+
+	err := service.urlRepository.InsertUrl(&url)
+	if err != nil {
+		message := "can't get url list from database"
+		return nil, err, message, http.StatusBadGateway
+	}
+
 	var result httpEntity.Url
 	result.ID = url.ID
 	result.CreatedAt = url.CreatedAt
@@ -67,43 +83,29 @@ func Success(url dbEntity.Url) (*httpEntity.Url, error, string, int) {
 	return &result, nil, message, http.StatusCreated
 }
 
-func InserForm(form httpEntity.UrlForm) dbEntity.Url {
-	var url dbEntity.Url
-	now := time.Now()
-	url.CreatedAt = now
-	url.Url = form.URL
-	url.UrlShort = form.Shortcode
-
-	return url
+func (service *UrlService) GetUrlFromDB() ([]*dbEntity.Url, error) {
+	fmt.Print("get url from db")
+	urlList, err := service.urlRepository.GetUrlList()
+	if err != nil {
+		return nil, err
+	}
+	return urlList, err
 }
 
 func (service *UrlService) ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url, error, string, int) {
-	urlList, err := service.urlRepository.GetUrlList()
+	urlList, err := service.GetUrlFromDB()
 	if err != nil {
 		message := "can't get url list from database"
 		return nil, err, message, http.StatusBadGateway
 	}
 	if len(urlList) == 0 && form.Shortcode == "" {
 		form.Shortcode = GenerateShortUrl()
-		url := InserForm(form)
-
-		err = service.urlRepository.InsertUrl(&url)
-		if err != nil {
-			message := "can't get url list from database"
-			return nil, err, message, http.StatusBadGateway
-		}
-		result, error, message, status := Success(url)
+		result, error, message, status := service.insertUrlToDB(form)
 		return result, error, message, status
 
 	} else if len(urlList) == 0 && form.Shortcode != "" {
 		if CheckInsertShortUrl(form.Shortcode) {
-			url := InserForm(form)
-			err := service.urlRepository.InsertUrl(&url)
-			if err != nil {
-				message := "can't insert data from database"
-				return nil, err, message, http.StatusBadGateway
-			}
-			result, error, message, status := Success(url)
+			result, error, message, status := service.insertUrlToDB(form)
 			return result, error, message, status
 		} else {
 			//not pass regex
@@ -115,26 +117,13 @@ func (service *UrlService) ShortenUrl(form httpEntity.UrlForm) (*httpEntity.Url,
 		for {
 			form.Shortcode = GenerateShortUrl()
 			if !CheckFormToDB(urlList, form.Shortcode) {
-				// inssert shorten code to database
-				url := InserForm(form)
-				err := service.urlRepository.InsertUrl(&url)
-				if err != nil {
-					message := "can't insert data from database"
-					return nil, err, message, http.StatusBadGateway
-				}
-				result, error, message, status := Success(url)
+				result, error, message, status := service.insertUrlToDB(form)
 				return result, error, message, status
 			}
 		}
 	} else if len(urlList) > 0 && form.Shortcode != "" {
 		if CheckInsertShortUrl(form.Shortcode) && !CheckFormToDB(urlList, form.Shortcode) {
-			url := InserForm(form)
-			err := service.urlRepository.InsertUrl(&url)
-			if err != nil {
-				message := "can't insert data from database"
-				return nil, err, message, http.StatusBadGateway
-			}
-			result, error, message, status := Success(url)
+			result, error, message, status := service.insertUrlToDB(form)
 			return result, error, message, status
 		} else if CheckInsertShortUrl(form.Shortcode) && CheckFormToDB(urlList, form.Shortcode) {
 			message := "The the desired shortcode is already in use. Shortcodes are case-sensitive."

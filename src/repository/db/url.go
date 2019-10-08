@@ -51,3 +51,9 @@ func (repository *UrlRepository) GetStats(shortcode string) (*dbEntity.Url, erro
 	err := repository.DB.Where("deleted_at IS NULL AND url_short = ?", shortcode).Find(&res)
 	return &res, err.Error
 }
+
+func (repository *UrlRepository) CheckUrlShort(shortcode string) (*dbEntity.Url, error) {
+	var url dbEntity.Url
+	err := repository.DB.Where("deleted_at IS NULL AND url_short = ?", shortcode).Find(&url)
+	return &url, err.Error
+}
